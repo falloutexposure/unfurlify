@@ -1,0 +1,15 @@
+name = "unfurlify-development"
+type = "javascript"
+account_id = "812fe038b629cd06682a5a1ad59c427d"
+workers_dev = true
+vars = { ENVIRONMENT = "development" }
+
+[dev]
+port = 8001
+
+[env.production]
+name = "unfurlify"
+zone_id = "3a8ea55e1e512b3e36252df9c33a3f55"
+routes = ["https://unfurlify.mushroomcloud.moe/api*"]
+workers_dev = false
+vars = { ENVIRONMENT = "production" }
