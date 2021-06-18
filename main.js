@@ -11,17 +11,25 @@ function renderJson(data, error = null, status = 200) {
 		'Access-Control-Allow-Origin': '*',
 		'Content-Type': 'application/json; charset=UTF-8',
 		'X-Unfurlify-Environment': ENVIRONMENT,
-		'X-Unfurlify-Version': '1.0'
+		'X-Unfurlify-Version': '1.1'
 	}});
 }
 
 function handleRequest(request) {
-	const url = new URL(request.url).searchParams.get('url');
-	return unfurl(url).then(metadata => renderJson(metadata)).catch(error => renderJson(null, error.message, 400));
+	const url = new URL(request.url);
+	if (request.method == 'GET' && url.pathname == '/api') {
+		return unfurl(url.searchParams.get('url')).then(metadata => renderJson(metadata)).catch(error => renderJson(null, error.message, 400));
+	} else {
+		throw new Error('INVALID_API_ENDPOINT');
+	}
 }
 
 function unfurl(url) {
-	if (!url || !['http:', 'https:'].includes(new URL(url).protocol)) return Promise.reject(new Error('INVALID_URL'));
+	try {
+		if (!url || !['http:', 'https:'].includes(new URL(url).protocol)) throw true;
+	} catch {
+		return Promise.reject(new Error('INVALID_URL'));
+	}
 	return fetch(url, {
 		headers: {
 			'Accept': 'text/html,application/xhtml+xml,application/xml',
@@ -45,6 +53,7 @@ function parse(response) {
 		hostname: (new URL(response.url)).hostname.replace('www.', ''),
 		title: null,
 		description: null,
+		favicon: null,
 		image: null,
 		video: null,
 		fallback: {},
@@ -57,7 +66,7 @@ function parse(response) {
 }
 
 const parsers = {
-	'opengraph'(parser, metadata) {
+	opengraph(parser, metadata) {
 		parser.on('meta[property="og:title"]', { element(element) {
 			metadata.title = element.getAttribute('content');
 		}}).on('meta[property="og:description"]', { element(element) {
@@ -66,12 +75,14 @@ const parsers = {
 			metadata.image = element.getAttribute('content');
 		}});
 	},
-	'heuristic'(parser, fallback) {
+	heuristic(parser, fallback) {
 		parser.on('title', { text(chunk) {
 			if (!fallback.title) fallback.title = '';
 			fallback.title += chunk.text;
 		}}).on('meta[name="description"]', { element(element) {
 			fallback.description = element.getAttribute('content');
+		}}).on('link[rel$="icon"]', { element(element) {
+			fallback.favicon ||= element.getAttribute('href');
 		}});
 	},
 	'youtube.com'(parser, metadata) {
@@ -88,6 +99,7 @@ function generate(metadata) {
 	return new Promise((resolve, reject) => {
 		for (let key in metadata) metadata[key] ||= metadata.fallback[key] || null;
 		delete metadata.fallback;
+		if (metadata.favicon && metadata.favicon.indexOf('://') == -1) metadata.favicon = [new URL(metadata.url).origin, metadata.favicon].join(metadata.favicon.charAt(0) == '/' ? '' : '/');
 		resolve(metadata);
 	});
 }
