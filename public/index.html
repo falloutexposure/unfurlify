@@ -4,10 +4,24 @@
 		<meta charset="utf-8">
 		<title>Unfurlify</title>
 		<link rel="shortcut icon" href="/favicon.png">
+		<meta property="og:title" content="Unfurlify">
+		<meta property="og:url" content="https://unfurlify.mushroomcloud.moe">
+		<meta property="og:description" content="Extract OpenGraph or meta tags from links">
+		<meta property="og:type" content="website">
+		<meta property="og:image" content="https://unfurlify.mushroomcloud.moe/fern.jpg">
 		<meta name="viewport" content="width=device-idth, initial-scale=1">
 		<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.1/dist/css/bootstrap.min.css" integrity="sha256-hHKA3d/HttC8OW3Sl093W8DoZudhHJDj++kZYo6MLzA=" crossorigin="anonymous">
 		<style>
 			/* https://coolors.co/c9e4ca-87bba2-55828b-3b6064-364958 */
+			form input.form-control:focus {
+				border-color: #87bba2;
+				box-shadow: 0 0 0 .25rem rgba(135,187,162,.40);
+			}
+
+			form pre {
+				background: #dfe2e2;
+				color: #2b3136;
+			}
 		</style>
 	</head>
 	<body>
@@ -24,6 +38,63 @@
 					<li><code>url</code> <a href="https://developer.mozilla.org/en-US/docs/Glossary/percent-encoding">Percent-encoded</a>.</li>
 				</ul>
 			</div>
+
+			<h5>Demo</h5>
+			<form class="row row-cols-md-auto g-2 align-items-center">
+				<div class="col-12 col-md-5">
+					<div class="input-group input-group-sm flex-nowrap">
+						<span class="input-group-text">URL</span>
+						<input type="text" name="url" class="form-control" autocomplete="url" placeholder="https://example.com">
+					</div>
+				</div>
+
+				<div class="col-12 d-grid d-md-block">
+					<button type="submit" class="btn btn-outline-success btn-sm" disabled>
+						<span class="spinner-border spinner-border-sm d-none" aria-hidden="true"></span> Try out
+					</button>
+				</div>
+
+				<div class="col-12 col-md-12">
+					<pre class="d-block d-none p-2 font-monospace rounded rounded-3"></pre>
+				</div>
+			</form>
 		</div>
+
+		<script>
+			(function() {
+				const form = document.querySelector('form'),
+				input = document.querySelector('form input'),
+				button = document.querySelector('form button'),
+				spinner = document.querySelector('form button span'),
+				pre = document.querySelector('form pre'),
+				unfurl = function(url) {
+					return fetch(`https://unfurlify.mushroomcloud.moe/api?url=${url}`).then(response => response.text());
+				};
+
+				input.addEventListener('input', function() {
+					button.toggleAttribute('disabled', !input.value);
+				});
+
+				form.addEventListener('submit', function(event) {
+					event.preventDefault();
+					if (!input.value) return;
+					pre.classList.add('d-none');
+					pre.innerText = '';
+					input.setAttribute('disabled', true);
+					button.setAttribute('disabled', true);
+					spinner.classList.remove('d-none');
+					setTimeout(function() {
+						unfurl(input.value).then(response => {
+							pre.innerText = response;
+							pre.classList.remove('d-none');
+							input.removeAttribute('disabled');
+							button.removeAttribute('disabled');
+							spinner.classList.add('d-none');
+							button.blur();
+						});
+					}, 200);
+				});
+			})();
+		</script>
 	</body>
 </html>
