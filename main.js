@@ -1,10 +1,4 @@
-const userAgents = {
-	bot: 'Mozilla/5.0 (compatible; Googlebot/2.1)',
- 	desktop: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:89.0) Gecko/20100101 Firefox/89.0',
-	hybrid: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:89.0) Gecko/20100101 Firefox/89.0 Twitterbot/1.0'
-}, sitesPreferences = {
-	'reddit.com': {userAgent: 'desktop'}
-}, htmlParsers = {
+const htmlParsers = {
 	opengraph(parser, metadata) {
 		parser.on('meta[property="og:title"]', { element(element) {
 			metadata.title = element.getAttribute('content');
@@ -45,18 +39,76 @@ const userAgents = {
 			metadata.video = element.getAttribute('content');
 		}});
 	}
-}, toFullUrl = function(value, base) {
+}, userAgents = {
+	bot: 'Mozilla/5.0 (compatible; Googlebot/2.1)',
+	desktop: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:89.0) Gecko/20100101 Firefox/89.0',
+	hybrid: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:89.0) Gecko/20100101 Firefox/89.0 Twitterbot/1.0'
+}, sitesPreferences = {
+	'reddit.com': {userAgent: 'desktop'},
+	'tiktok.com': {userAgent: 'bot'}
+}, b2 = {
+	authorization: null,
+	getAuthorization: async (force) => {
+		let auth = await KEVINS.get('B2_AUTHORIZATION', {type: 'json'}).catch(console.error);
+		if (auth && !force) return auth;
+		const credentials = btoa(`${B2_KEY_ID}:${B2_APPLICATION_KEY}`);
+		auth = await fetch('https://api.backblazeb2.com/b2api/v2/b2_authorize_account', {
+			headers: {'Accept': 'application/json', 'Authorization': `Basic ${credentials}`}
+		}).then(response => response.json()).catch(console.error);
+		await KEVINS.put('B2_AUTHORIZATION', JSON.stringify(auth), {expirationTtl: 60 * 60 * 20});
+		return auth;
+	},
+	executeApi: async (name, headers, body) => {
+		return await fetch(`${b2.authorization.apiUrl}/b2api/v2/${name}`, {
+			method: 'POST',
+			headers: Object.assign({
+				'Accept': 'application/json',
+				'Authorization': b2.authorization.authorizationToken,
+				'Content-Type': 'application/json; charset=UTF-8'
+			}, headers || {}),
+			body: JSON.stringify(body)
+		}).then(response => response.json()).catch(console.error);
+	},
+	uploadFile: async (file) => {
+		const uploadAuthorization = await b2.executeApi('b2_get_upload_url', null, {bucketId: b2.authorization.allowed.bucketId});
+		return await fetch(uploadAuthorization.uploadUrl, {
+			method: 'POST',
+			headers: {
+				'Accept': 'application/json',
+				'Authorization': uploadAuthorization.authorizationToken,
+				'Content-Type': file.contentType,
+				'X-Bz-File-Name': file.fileName,
+				'X-Bz-Content-Sha1': 'do_not_verify'
+			},
+			body: file.body
+		}).then(response => response.json()).catch(console.error);
+	},
+	store: async (url) => {
+		const urlDigest = await generateDigest(url), file = await fetch(url).then(response => ({
+			contentType: response.headers.get('content-type'),
+			fileName: [urlDigest, (new URL(url).pathname.match(/\.[a-z]{3,4}$/) || ['.unknown'])[0]].join(''),
+			body: response.body
+		}));
+		return await b2.uploadFile(file).then(response => {
+			return `${b2.authorization.downloadUrl}/file/${b2.authorization.allowed.bucketName}/${response.fileName}`;
+		});
+	}
+}, toFullUrl = (value, base) => {
 	value = (value || '').replace(/&amp;/g, '&');
 	if (/^\/\//.test(value)) return `${base.protocol}${value}`;
 	if (!/^https?:\/\//.test(value)) return [base.origin, value].join(value.charAt(0) == '/' ? '' : '/');
 	return value;
+}, generateDigest = (text) => {
+	return crypto.subtle.digest({name: 'SHA-256'}, new TextEncoder().encode(text)).then(digest => {
+		return Array.prototype.map.call(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
+	});
 };
 
 addEventListener('fetch', event => {
 	try {
 		event.respondWith(handleRequest(event));
 	} catch (error) {
-		event.respondWith(renderJson(null, `Internal Error - ${error.message || error.name || error.toString()}`, 500));
+		event.respondWith(renderJson(null, `Internal Error - ${error.message || error.name || error.toString()}\n${error.stack}`, 500));
 	}
 });
 
@@ -66,7 +118,7 @@ function renderJson(data, error = null, status = 200) {
 		'Content-Type': 'application/json; charset=UTF-8',
 		'Cache-Control': 's-maxage=3600',
 		'X-Unfurlify-Environment': ENVIRONMENT,
-		'X-Unfurlify-Version': '1.2'
+		'X-Unfurlify-Version': '1.3'
 	}});
 }
 
@@ -142,18 +194,32 @@ function parseHtml(url, response) {
 	return parser.transform(response).text().then(() => metadata);
 }
 
-function generate(metadata) {
-	return new Promise((resolve, reject) => {
-		for (let key in metadata) metadata[key] ||= metadata.fallback[key] || null;
-		delete metadata.fallback;
-		if (metadata.image) metadata.image = toFullUrl(metadata.image, metadata.url);
-		if (metadata.favicon) {
-			metadata.favicon = toFullUrl(metadata.favicon, metadata.url);
-			resolve(metadata);
+async function generate(metadata) {
+	for (let key in metadata) metadata[key] ||= metadata.fallback[key] || null;
+	delete metadata.fallback;
+	if (metadata.image) metadata.image = toFullUrl(metadata.image, metadata.url);
+	if (metadata.favicon) {
+		metadata.favicon = toFullUrl(metadata.favicon, metadata.url);
+	} else {
+		await fetch(`${metadata.url.origin}/favicon.ico`).then(response => {
+			if (response.ok) metadata.favicon = response.url;
+		});
+	}
+	if (metadata.image || metadata.favicon) {
+		b2.authorization = await b2.getAuthorization();
+		if (metadata.image == metadata.favicon) {
+			metadata.image = await b2.store(metadata.image);
+			metadata.favicon = metadata.image;
 		} else {
-			fetch(`${metadata.url.origin}/favicon.ico`).then(response => {
-				if (response.ok) metadata.favicon = response.url;
-			}).finally(() => resolve(metadata));
+			if (metadata.image) metadata.image = await b2.store(metadata.image);
+			if (metadata.favicon) metadata.favicon = await b2.store(metadata.favicon);
 		}
-	});
+	}
+	return metadata;
 }
+
+
+// CRON TRIGGERS
+if (ENVIRONMENT == 'production') addEventListener('scheduled', event => {
+	event.waitUntil(b2.getAuthorization(true));
+});
