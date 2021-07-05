@@ -1,4 +1,4 @@
-const htmlParsers = {
+const VERSION = '1.4', CACHE_TTL = 60 * 60 * 24, htmlParsers = {
 	opengraph(parser, metadata) {
 		parser.on('meta[property="og:title"]', { element(element) {
 			metadata.title = element.getAttribute('content');
@@ -84,17 +84,21 @@ const htmlParsers = {
 		}).then(response => response.json()).catch(console.error);
 	},
 	store: async (url) => {
+		if (!b2.authorization) b2.authorization = await b2.getAuthorization();
 		const urlDigest = await generateDigest(url), file = await fetch(url).then(response => ({
 			contentType: response.headers.get('content-type'),
-			fileName: [urlDigest, (new URL(url).pathname.match(/\.[a-z]{3,4}$/) || ['.unknown'])[0]].join(''),
+			fileName: [urlDigest, (new URL(url).pathname.match(/\.[a-z]{3,4}$/) || [])[0] || '.' + response.headers.get('content-type').split('/').pop()].join(''),
 			body: response.body
 		}));
 		return await b2.uploadFile(file).then(response => {
 			return `${b2.authorization.downloadUrl}/file/${b2.authorization.allowed.bucketName}/${response.fileName}`;
 		});
 	}
+}, decodeHtml = (text) => {
+	const specialChars = {'&quot;': '"', '&apos;': "'", '&amp;': '&', '&lt;': '<', '&gt;': '>'};
+	return text ? text.replace(/&quot;|&apos;|&amp;|&lt;|&gt;/g, match => specialChars[match]) : text;
 }, toFullUrl = (value, base) => {
-	value = (value || '').replace(/&amp;/g, '&');
+	value = decodeHtml(value || '');
 	if (/^\/\//.test(value)) return `${base.protocol}${value}`;
 	if (!/^https?:\/\//.test(value)) return [base.origin, value].join(value.charAt(0) == '/' ? '' : '/');
 	return value;
@@ -116,9 +120,9 @@ function renderJson(data, error = null, status = 200) {
 	return new Response(JSON.stringify({data: data, error: error}, null, ' ') + "\n", {status: status, headers: {
 		'Access-Control-Allow-Origin': '*',
 		'Content-Type': 'application/json; charset=UTF-8',
-		'Cache-Control': 's-maxage=3600',
+		'Cache-Control': `s-maxage=${CACHE_TTL}`,
 		'X-Unfurlify-Environment': ENVIRONMENT,
-		'X-Unfurlify-Version': '1.3'
+		'X-Unfurlify-Version': VERSION
 	}});
 }
 
@@ -131,6 +135,7 @@ function handleRequest(event) {
 			if (cache && !byPassCache) {
 				return cache;
 			} else {
+				b2.getAuthorization(); // preload
 				return unfurl(url.searchParams.get('url')).then(metadata => {
 					const response = renderJson(metadata);
 					if (!byPassCache) event.waitUntil(caches.default.put(cacheKey, response.clone()));
@@ -197,6 +202,8 @@ function parseHtml(url, response) {
 async function generate(metadata) {
 	for (let key in metadata) metadata[key] ||= metadata.fallback[key] || null;
 	delete metadata.fallback;
+	metadata.title = decodeHtml(metadata.title);
+	metadata.description = decodeHtml(metadata.description);
 	if (metadata.image) metadata.image = toFullUrl(metadata.image, metadata.url);
 	if (metadata.favicon) {
 		metadata.favicon = toFullUrl(metadata.favicon, metadata.url);
@@ -206,7 +213,6 @@ async function generate(metadata) {
 		});
 	}
 	if (metadata.image || metadata.favicon) {
-		b2.authorization = await b2.getAuthorization();
 		if (metadata.image == metadata.favicon) {
 			metadata.image = await b2.store(metadata.image);
 			metadata.favicon = metadata.image;
