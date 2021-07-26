@@ -21,3 +21,4 @@ test:
 	curl -v 'http://127.0.0.1:8001/api?url=https%3A%2F%2Fexample.com%2F&cache=no'
 # 	curl -v 'http://127.0.0.1:8001/api?url=https%3A%2F%2Fwww.taylorswift.com%2F&cache=no'
 # 	curl -v 'http://127.0.0.1:8001/api?url=https%3A%2F%2Fwww.youtube.com%2Fwatch%3Fv%3Dz5iK8D-5T8s'
+# 	curl -v 'http://127.0.0.1:8001/api?url=https%3A%2F%2Fvimeo.com%2F472950471&cache=no'
