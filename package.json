@@ -1,8 +1,0 @@
-{
-  "private": true,
-  "name": "unfurlify",
-  "version": "0.1",
-  "description": "Extract OpenGraph or meta tags from links",
-  "main": "main.js",
-  "license": "MIT"
-}
